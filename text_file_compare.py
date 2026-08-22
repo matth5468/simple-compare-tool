@@ -16,10 +16,20 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
 
 class NumberedCanvas(canvas.Canvas):
-    """Canvas that adds 'Page X of Y' to the bottom of every page."""
+    """Canvas that adds filenames at the top and page X of Y at the bottom."""
 
-    def __init__(self, *args, **kwargs):
-        canvas.Canvas.__init__(self, *args, **kwargs)
+    def __init__(
+        self,
+        *args,
+        left_file="",
+        right_file="",
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+
+        self.left_file = Path(left_file).name if left_file else ""
+        self.right_file = Path(right_file).name if right_file else ""
+
         self._saved_page_states = []
 
     def showPage(self):
@@ -31,30 +41,43 @@ class NumberedCanvas(canvas.Canvas):
 
         for state in self._saved_page_states:
             self.__dict__.update(state)
-            self.draw_page_number(total_pages)
+            self.draw_header_and_footer(total_pages)
             canvas.Canvas.showPage(self)
 
         canvas.Canvas.save(self)
 
-    def draw_page_number(self, total_pages):
+    def draw_header_and_footer(self, total_pages):
         page_number = self._pageNumber
-
-        self.setFont("Helvetica", 8)
-
-        text = f"Page {page_number} of {total_pages}"
-
         page_width, page_height = landscape(letter)
+
+        # Header
+        self.setFont("Helvetica-Bold", 9)
+
+        self.drawString(
+            28,
+            page_height - 20,
+            f"Left: {self.left_file}"
+        )
+
+        self.drawRightString(
+            page_width - 28,
+            page_height - 20,
+            f"Right: {self.right_file}"
+        )
+
+        # Footer
+        self.setFont("Helvetica", 8)
 
         self.drawCentredString(
             page_width / 2,
             15,
-            text
+            f"Page {page_number} of {total_pages}"
         )
 
 class FileDiffViewer:
     def __init__(self, root):
         self.root = root
-        self.root.title("Text File Compare v1.02")
+        self.root.title("Text File Compare v1.03")
         self.root.geometry("1500x850")
         self.root.minsize(1000, 600)
 
@@ -366,8 +389,8 @@ class FileDiffViewer:
             pagesize=landscape(letter),
             rightMargin=28,
             leftMargin=28,
-            topMargin=28,
-            bottomMargin=28
+            topMargin=45,
+            bottomMargin=35
         )
 
         styles = getSampleStyleSheet()
@@ -406,14 +429,15 @@ class FileDiffViewer:
 
         story.append(Paragraph("Text File Differences", title_style))
         story.append(Spacer(1, 8))
-        story.append(
-            Paragraph(
-                f"<b>Left:</b> {self._escape(Path(self.file1).name)}<br/>"
-                f"<b>Right:</b> {self._escape(Path(self.file2).name)}",
-                styles["Normal"]
-            )
-        )
-        story.append(Spacer(1, 12))
+
+        #story.append(
+        #    Paragraph(
+        #        f"<b>Left:</b> {self._escape(Path(self.file1).name)}<br/>"
+        #        f"<b>Right:</b> {self._escape(Path(self.file2).name)}",
+        #        styles["Normal"]
+        #    )
+        #)
+        #story.append(Spacer(1, 12))
 
         diff_rows = []
 
@@ -474,7 +498,12 @@ class FileDiffViewer:
 
         doc.build(
             story,
-            canvasmaker=NumberedCanvas
+            canvasmaker=lambda *args, **kwargs: NumberedCanvas(
+                *args,
+                left_file=self.file1,
+                right_file=self.file2,
+                **kwargs
+            )
         )
 
     @staticmethod
@@ -485,7 +514,6 @@ class FileDiffViewer:
             .replace("<", "&lt;")
             .replace(">", "&gt;")
         )
-
 
 def main():
     root = tk.Tk()
