@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import difflib
 import re
+from reportlab.pdfgen import canvas
 
 try:
     from reportlab.lib import colors
@@ -14,11 +15,46 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
+class NumberedCanvas(canvas.Canvas):
+    """Canvas that adds 'Page X of Y' to the bottom of every page."""
+
+    def __init__(self, *args, **kwargs):
+        canvas.Canvas.__init__(self, *args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        total_pages = len(self._saved_page_states)
+
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_number(total_pages)
+            canvas.Canvas.showPage(self)
+
+        canvas.Canvas.save(self)
+
+    def draw_page_number(self, total_pages):
+        page_number = self._pageNumber
+
+        self.setFont("Helvetica", 8)
+
+        text = f"Page {page_number} of {total_pages}"
+
+        page_width, page_height = landscape(letter)
+
+        self.drawCentredString(
+            page_width / 2,
+            15,
+            text
+        )
 
 class FileDiffViewer:
     def __init__(self, root):
         self.root = root
-        self.root.title("Text File Compare v1.01")
+        self.root.title("Text File Compare v1.02")
         self.root.geometry("1500x850")
         self.root.minsize(1000, 600)
 
@@ -368,7 +404,7 @@ class FileDiffViewer:
 
         story = []
 
-        story.append(Paragraph("Text File Difference Report", title_style))
+        story.append(Paragraph("Text File Differences", title_style))
         story.append(Spacer(1, 8))
         story.append(
             Paragraph(
@@ -436,7 +472,10 @@ class FileDiffViewer:
             ]))
             story.append(table)
 
-        doc.build(story)
+        doc.build(
+            story,
+            canvasmaker=NumberedCanvas
+        )
 
     @staticmethod
     def _escape(text):
