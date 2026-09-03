@@ -3,7 +3,6 @@ from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import difflib
 import re
-from reportlab.pdfgen import canvas
 
 try:
     from reportlab.lib import colors
@@ -15,69 +14,11 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
-class NumberedCanvas(canvas.Canvas):
-    """Canvas that adds filenames at the top and page X of Y at the bottom."""
-
-    def __init__(
-        self,
-        *args,
-        left_file="",
-        right_file="",
-        **kwargs
-    ):
-        super().__init__(*args, **kwargs)
-
-        self.left_file = Path(left_file).name if left_file else ""
-        self.right_file = Path(right_file).name if right_file else ""
-
-        self._saved_page_states = []
-
-    def showPage(self):
-        self._saved_page_states.append(dict(self.__dict__))
-        self._startPage()
-
-    def save(self):
-        total_pages = len(self._saved_page_states)
-
-        for state in self._saved_page_states:
-            self.__dict__.update(state)
-            self.draw_header_and_footer(total_pages)
-            canvas.Canvas.showPage(self)
-
-        canvas.Canvas.save(self)
-
-    def draw_header_and_footer(self, total_pages):
-        page_number = self._pageNumber
-        page_width, page_height = landscape(letter)
-
-        # Header
-        self.setFont("Helvetica-Bold", 9)
-
-        self.drawString(
-            28,
-            page_height - 20,
-            f"Left: {self.left_file}"
-        )
-
-        self.drawRightString(
-            page_width - 28,
-            page_height - 20,
-            f"Right: {self.right_file}"
-        )
-
-        # Footer
-        self.setFont("Helvetica", 8)
-
-        self.drawCentredString(
-            page_width / 2,
-            15,
-            f"Page {page_number} of {total_pages}"
-        )
 
 class FileDiffViewer:
     def __init__(self, root):
         self.root = root
-        self.root.title("Text File Compare v1.03")
+        self.root.title("Text File Compare v1.04")
         self.root.geometry("1500x850")
         self.root.minsize(1000, 600)
 
@@ -86,6 +27,7 @@ class FileDiffViewer:
         self.lines1 = []
         self.lines2 = []
         self.opcodes = []
+        self.show_replacements_as_add_delete = tk.BooleanVar(value=False)
 
         self._build_ui()
 
@@ -96,6 +38,13 @@ class FileDiffViewer:
         ttk.Button(toolbar, text="Open Left File", command=self.open_left).pack(side="left", padx=4)
         ttk.Button(toolbar, text="Open Right File", command=self.open_right).pack(side="left", padx=4)
         ttk.Button(toolbar, text="Compare Files", command=self.compare).pack(side="left", padx=12)
+
+        ttk.Checkbutton(
+            toolbar,
+            text="Show changed lines as removed/added",
+            variable=self.show_replacements_as_add_delete
+        ).pack(side="left", padx=4)
+
         ttk.Button(toolbar, text="Export Differences to PDF",
                    command=self.export_pdf).pack(side="left", padx=4)
 
@@ -292,29 +241,42 @@ class FileDiffViewer:
                 right_count = j2 - j1
                 count = max(left_count, right_count)
 
-                for offset in range(count):
-                    if offset < left_count:
+                if self.show_replacements_as_add_delete.get():
+                    # A replacement is displayed as a deletion on the left
+                    # and an insertion on the right, like a strict +/- diff.
+                    for offset in range(left_count):
                         lno = i1 + offset
-                        left_line = self.lines1[lno]
                         self._insert_line(
-                            self.left_text, lno + 1, left_line, "changed"
-                        )
-                    if offset < right_count:
-                        rno = j1 + offset
-                        right_line = self.lines2[rno]
-                        self._insert_line(
-                            self.right_text, rno + 1, right_line, "changed"
+                            self.left_text, lno + 1, self.lines1[lno], "removed"
                         )
 
-                # Highlight changed words for one-to-one replacements.
-                if left_count == right_count:
-                    for offset in range(left_count):
-                        self._highlight_changed_words(
-                            self.left_text,
-                            self.right_text,
-                            i1 + offset + 1,
-                            j1 + offset + 1
+                    for offset in range(right_count):
+                        rno = j1 + offset
+                        self._insert_line(
+                            self.right_text, rno + 1, self.lines2[rno], "added"
                         )
+                else:
+                    for offset in range(count):
+                        if offset < left_count:
+                            lno = i1 + offset
+                            self._insert_line(
+                                self.left_text, lno + 1, self.lines1[lno], "changed"
+                            )
+                        if offset < right_count:
+                            rno = j1 + offset
+                            self._insert_line(
+                                self.right_text, rno + 1, self.lines2[rno], "changed"
+                            )
+
+                    # Highlight changed words for one-to-one replacements.
+                    if left_count == right_count:
+                        for offset in range(left_count):
+                            self._highlight_changed_words(
+                                self.left_text,
+                                self.right_text,
+                                i1 + offset + 1,
+                                j1 + offset + 1
+                            )
 
         self.left_text.config(state="disabled")
         self.right_text.config(state="disabled")
@@ -389,8 +351,8 @@ class FileDiffViewer:
             pagesize=landscape(letter),
             rightMargin=28,
             leftMargin=28,
-            topMargin=45,
-            bottomMargin=35
+            topMargin=28,
+            bottomMargin=28
         )
 
         styles = getSampleStyleSheet()
@@ -427,17 +389,16 @@ class FileDiffViewer:
 
         story = []
 
-        story.append(Paragraph("Text File Differences", title_style))
+        story.append(Paragraph("Text File Difference Report", title_style))
         story.append(Spacer(1, 8))
-
-        #story.append(
-        #    Paragraph(
-        #        f"<b>Left:</b> {self._escape(Path(self.file1).name)}<br/>"
-        #        f"<b>Right:</b> {self._escape(Path(self.file2).name)}",
-        #        styles["Normal"]
-        #    )
-        #)
-        #story.append(Spacer(1, 12))
+        story.append(
+            Paragraph(
+                f"<b>Left:</b> {self._escape(Path(self.file1).name)}<br/>"
+                f"<b>Right:</b> {self._escape(Path(self.file2).name)}",
+                styles["Normal"]
+            )
+        )
+        story.append(Spacer(1, 12))
 
         diff_rows = []
 
@@ -468,6 +429,9 @@ class FileDiffViewer:
                 elif tag == "insert":
                     ls = normal
                     rs = add_style
+                elif tag == "replace" and self.show_replacements_as_add_delete.get():
+                    ls = del_style if left_cell else normal
+                    rs = add_style if right_cell else normal
                 else:
                     ls = change_style if left_cell else normal
                     rs = change_style if right_cell else normal
@@ -496,15 +460,7 @@ class FileDiffViewer:
             ]))
             story.append(table)
 
-        doc.build(
-            story,
-            canvasmaker=lambda *args, **kwargs: NumberedCanvas(
-                *args,
-                left_file=self.file1,
-                right_file=self.file2,
-                **kwargs
-            )
-        )
+        doc.build(story)
 
     @staticmethod
     def _escape(text):
@@ -514,6 +470,7 @@ class FileDiffViewer:
             .replace("<", "&lt;")
             .replace(">", "&gt;")
         )
+
 
 def main():
     root = tk.Tk()
